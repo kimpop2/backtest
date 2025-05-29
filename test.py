@@ -15,6 +15,9 @@ from db.db_manager import DBManager #task3
 
 from api_client.creon_api import CreonAPIClient #task4
 
+from data_manager.stock_data_manager import StockDataManager
+
+
 def run_db_tests():
     """DBManager 클래스의 기본 기능을 테스트합니다."""
     print("--- DBManager 통합 테스트 시작 ---")
@@ -133,6 +136,51 @@ def run_creon_api_tests():
     finally:
         print("\n--- Creon API Client 통합 테스트 종료 ---")
 
+
+def run_stock_data_manager_tests():
+    """StockDataManager 클래스의 기본 기능을 테스트합니다."""
+    print("\n--- StockDataManager 통합 테스트 시작 ---")
+    stock_data_manager = None
+    try:
+        stock_data_manager = StockDataManager()
+
+        # 1. 종목 정보 초기화/업데이트 테스트
+        print("\n--- Initialize Stock Info Test ---")
+        # 매번 테스트 실행 시 DB의 stock_info를 강제로 업데이트하도록 설정
+        stock_data_manager.initialize_stock_info(force_update=True) 
+
+        # 2. 일봉 데이터 업데이트 테스트 (삼성전자 A005930)
+        print("\n--- Update Daily OHLCV Data Test (A005930) ---")
+        end_date_daily = datetime.now().date()
+        start_date_daily = end_date_daily - timedelta(days=30)
+        stock_data_manager.update_daily_ohlcv_data(stock_code='A005930', start_date=start_date_daily, end_date=end_date_daily)
+        
+        # 3. 분봉 데이터 업데이트 테스트 (SK하이닉스 A000660, 1분봉, 최근 1일)
+        print("\n--- Update Minute OHLCV Data Test (A000660, 1-min) ---")
+        minute_end_date = datetime.now().date()
+        minute_start_date = minute_end_date # 오늘 하루치 분봉만
+        stock_data_manager.update_minute_ohlcv_data(stock_code='A000660', start_date=minute_start_date, end_date=minute_end_date)
+
+        # 4. 데이터 조회 확인 (선택 사항, DBManager 직접 사용)
+        print("\n--- Verify Data in DB (Manual Check) ---")
+        db_manager = stock_data_manager.db_manager
+        fetched_daily = db_manager.fetch_daily_data('A005930', start_date_daily, end_date_daily)
+        print(f"\nFetched {len(fetched_daily)} daily records for A005930 from DB.")
+        if not fetched_daily.empty:
+            print(fetched_daily.tail())
+
+    except ConnectionError as e:
+        print(f"StockDataManager 테스트 중 연결 오류: {e}")
+    except Exception as e:
+        # exc_info=True 인자 제거
+        print(f"StockDataManager 테스트 중 오류 발생: {e}") 
+    finally:
+        print("\n--- StockDataManager 통합 테스트 종료 ---")
+
+
+
 if __name__ == "__main__":
     #run_db_tests()
-    run_creon_api_tests()
+    
+    #run_creon_api_tests()
+    run_stock_data_manager_tests()

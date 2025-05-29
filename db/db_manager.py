@@ -221,54 +221,139 @@ class DBManager:
         return self.insert_data('trade_log', trade_logs)
 
 
-# 테스트를 위한 메인 실행 블록 (선택 사항, 개발 중 확인용)
-if __name__ == "__main__":
-    db_manager = DBManager()
+    def get_stock_info_count(self):
+        """stock_info 테이블의 총 레코드 개수를 반환합니다."""
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return 0
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM stock_info")
+            result = cursor.fetchone() # 결과를 먼저 변수에 할당
+            if result is not None: # 결과가 None이 아닌지 확인
+                count = result[0]
+                logger.info(f"Current stock_info table has {count} records.")
+                return count
+            else: # 결과가 None인 경우 (예외적인 상황이지만 대비)
+                logger.warning("No result from COUNT(*) query for stock_info table. Assuming 0 records.")
+                return 0
+        except Exception as e:
+            logger.error(f"Failed to get stock info count: {e}", exc_info=True)
+            return 0
+        finally:
+            if conn:
+                conn.close()
 
-    # 1. DB 연결 테스트
-    try:
-        conn_test = db_manager.get_db_connection()
-        if conn_test:
-            print("DB 연결 테스트 성공!")
-            conn_test.close()
-        else:
-            print("DB 연결 테스트 실패!")
-    except Exception as e:
-        print(f"DB 연결 중 오류 발생: {e}")
+    def get_latest_daily_data_date(self, stock_code):
+        """
+        특정 종목의 daily_stock_data 테이블에서 가장 최근 날짜를 조회합니다.
+        :param stock_code: 조회할 종목 코드
+        :return: datetime.date 객체 또는 None
+        """
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return None
+            cursor = conn.cursor()
+            query = "SELECT MAX(date) FROM daily_stock_data WHERE stock_code = %s"
+            cursor.execute(query, (stock_code,))
+            result = cursor.fetchone() # 결과를 먼저 변수에 할당
+            if result is not None and result[0] is not None: # 결과가 None이 아니고, 첫 번째 컬럼도 None이 아닌지 확인
+                latest_date = result[0]
+                logger.info(f"Latest daily data date for {stock_code}: {latest_date}")
+                return latest_date
+            else:
+                logger.info(f"No daily data found for {stock_code}.")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get latest daily data date for {stock_code}: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def save_minute_data(self, data):
+        """
+        분봉 데이터를 minute_stock_data 테이블에 저장합니다.
+        :param data: [{'stock_code': 'A000660', 'datetime': ..., 'open_price': ..., ...}, ...]
+        """
+        if not data:
+            logger.warning("No minute data to save.")
+            return 0
 
-    # 2. stock_info 테이블에 데이터 삽입 테스트
-    print("\n--- Stock Info Insert Test ---")
-    sample_stock_info = [
-        {'stock_code': 'A005930', 'stock_name': '삼성전자', 'market_type': 'KOSPI', 'sector': '반도체', 'per': 15.0, 'pbr': 1.5, 'eps': 5000.0},
-        {'stock_code': 'A000660', 'stock_name': 'SK하이닉스', 'market_type': 'KOSPI', 'sector': '반도체', 'per': 10.0, 'pbr': 1.2, 'eps': 8000.0}
-    ]
-    try:
-        db_manager.save_stock_info(sample_stock_info)
-    except Exception as e:
-        print(f"Stock info 삽입 오류: {e}")
+        conn = None
+        saved_count = 0
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return 0
+            cursor = conn.cursor()
 
-    # 3. daily_stock_data 테이블에 데이터 삽입 테스트
-    print("\n--- Daily Data Insert Test ---")
-    sample_daily_data = [
-        {'stock_code': 'A005930', 'date': '2023-01-02', 'open_price': 60000, 'high_price': 61000, 'low_price': 59500, 'close_price': 60500, 'volume': 10000000, 'change_rate': 0.8, 'trading_value': 605000000000},
-        {'stock_code': 'A005930', 'date': '2023-01-03', 'open_price': 60500, 'high_price': 61500, 'low_price': 60000, 'close_price': 61000, 'volume': 12000000, 'change_rate': 0.83, 'trading_value': 732000000000},
-        {'stock_code': 'A000660', 'date': '2023-01-02', 'open_price': 90000, 'high_price': 91000, 'low_price': 89500, 'close_price': 90500, 'volume': 5000000, 'change_rate': 0.5, 'trading_value': 452500000000}
-    ]
-    try:
-        db_manager.save_daily_data(sample_daily_data)
-    except Exception as e:
-        print(f"Daily data 삽입 오류: {e}")
+            insert_query = """
+            INSERT INTO minute_stock_data (stock_code, datetime, open_price, high_price, low_price, close_price, volume)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                open_price=VALUES(open_price),
+                high_price=VALUES(high_price),
+                low_price=VALUES(low_price),
+                close_price=VALUES(close_price),
+                volume=VALUES(volume);
+            """
+            
+            records = []
+            for record in data:
+                records.append((
+                    record['stock_code'],
+                    record['datetime'], # datetime 객체
+                    record['open_price'],
+                    record['high_price'],
+                    record['low_price'],
+                    record['close_price'],
+                    record['volume']
+                ))
+            
+            cursor.executemany(insert_query, records)
+            conn.commit()
+            saved_count = cursor.rowcount
+            logger.info(f"Successfully inserted {saved_count} record(s) into minute_stock_data.")
+            return saved_count
+        except Exception as e:
+            logger.error(f"Failed to save minute data: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            return 0
+        finally:
+            if conn:
+                conn.close()
 
-
-    # 4. 데이터 조회 테스트
-    print("\n--- Data Fetch Test ---")
-    try:
-        fetched_info = db_manager.fetch_stock_info(stock_codes=['A005930'])
-        print("\nFetched Stock Info (A005930):")
-        print(fetched_info)
-
-        fetched_daily = db_manager.fetch_daily_data('A005930', start_date='2023-01-01', end_date='2023-01-03')
-        print("\nFetched Daily Data (A005930, 2023-01-01 to 2023-01-03):")
-        print(fetched_daily)
-    except Exception as e:
-        print(f"데이터 조회 오류: {e}")
+    def get_latest_minute_data_datetime(self, stock_code): # interval 인자 제거 (확인)
+        """
+        특정 종목의 minute_stock_data 테이블에서 가장 최근 날짜/시간을 조회합니다.
+        :param stock_code: 조회할 종목 코드
+        :return: datetime.datetime 객체 또는 None
+        """
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return None
+            cursor = conn.cursor()
+            # 쿼리에서 `interval` 조건 제거 (확인)
+            query = "SELECT MAX(datetime) FROM minute_stock_data WHERE stock_code = %s"
+            cursor.execute(query, (stock_code,))
+            result = cursor.fetchone() # 결과를 먼저 변수에 할당
+            if result is not None and result[0] is not None: # 결과가 None이 아니고, 첫 번째 컬럼도 None이 아닌지 확인
+                latest_datetime = result[0]
+                logger.info(f"Latest minute data datetime for {stock_code}: {latest_datetime}")
+                return latest_datetime
+            else:
+                logger.info(f"No minute data found for {stock_code}.")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get latest minute data datetime for {stock_code}: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                conn.close()

@@ -4,6 +4,16 @@
 CREATE DATABASE IF NOT EXISTS backtest_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE backtest_db;
 
+SET FOREIGN_KEY_CHECKS = 0; -- 외래 키 검사 일시 비활성화
+
+DROP TABLE IF EXISTS trade_log;
+DROP TABLE IF EXISTS backtest_results;
+DROP TABLE IF EXISTS minute_stock_data;
+DROP TABLE IF EXISTS daily_stock_data;
+DROP TABLE IF EXISTS stock_info;
+
+SET FOREIGN_KEY_CHECKS = 1; -- 외래 키 검사 다시 활성화
+
 -- 1. 종목 정보 테이블
 -- Creon API를 통해 얻는 종목 코드, 종목명, 시장 구분 등을 저장
 CREATE TABLE IF NOT EXISTS stock_info (
@@ -31,9 +41,7 @@ CREATE TABLE IF NOT EXISTS daily_stock_data (
     volume BIGINT NOT NULL,
     change_rate DECIMAL(10, 2), -- 전일 대비 등락률
     trading_value BIGINT,       -- 거래 대금
-    PRIMARY KEY (stock_code, date), -- 종목 코드와 날짜 조합으로 유니크
-    FOREIGN KEY (stock_code) REFERENCES stock_info(stock_code)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+    PRIMARY KEY (stock_code, date) -- 종목 코드와 날짜 조합으로 유니크
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. 분봉(Minute) 주식 데이터 테이블 (선택적: 필요시 나중에 추가)
@@ -46,9 +54,7 @@ CREATE TABLE IF NOT EXISTS minute_stock_data (
     low_price INT NOT NULL,
     close_price INT NOT NULL,
     volume BIGINT NOT NULL,
-    PRIMARY KEY (stock_code, datetime),
-    FOREIGN KEY (stock_code) REFERENCES stock_info(stock_code)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+    PRIMARY KEY (stock_code, datetime)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -90,7 +96,5 @@ CREATE TABLE IF NOT EXISTS trade_log (
     position_size INT,                          -- 거래 후 포지션 크기
     portfolio_value BIGINT,                     -- 거래 시점 전체 포트폴리오 가치
     FOREIGN KEY (result_id) REFERENCES backtest_results(result_id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (stock_code) REFERENCES stock_info(stock_code)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+        ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
