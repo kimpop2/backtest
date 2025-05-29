@@ -1,8 +1,8 @@
 # backtest/test.py
-
+import logging
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 # 프로젝트 루트 디렉토리를 sys.path에 추가 (이 부분이 중요합니다)
 # test.py가 백테스트 폴더(프로젝트 루트)에 있으므로,
@@ -12,11 +12,21 @@ sys.path.insert(0, project_root)
 
 # 이제 db.db_manager를 임포트할 수 있습니다.
 from db.db_manager import DBManager #task3
-
 from api_client.creon_api import CreonAPIClient #task4
-
 from data_manager.stock_data_manager import StockDataManager
 
+# 백테스팅 관련 모듈 임포트
+from backtester.backtester import Backtester
+from strategy.moving_average_crossover import MovingAverageCrossoverStrategy
+from db.db_manager import DBManager # DB 초기화 및 데이터 확인용
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(sys.stdout)
+                    ])
+logger = logging.getLogger(__name__)
 
 def run_db_tests():
     """DBManager 클래스의 기본 기능을 테스트합니다."""
@@ -178,9 +188,82 @@ def run_stock_data_manager_tests():
         print("\n--- StockDataManager 통합 테스트 종료 ---")
 
 
+def run_full_backtest_test():
+    logger.info("--- StockDataManager 통합 테스트 시작 ---")
+    # 이전 테스트에서 주석 처리되었던 부분은 여기에 포함되지 않습니다.
+    # 만약 StockDataManager 기능 테스트가 필요하다면 별도 함수로 분리하거나,
+    # 아래 Backtester.load_data_for_backtest가 그 역할을 대신합니다.
+    logger.info("--- StockDataManager 통합 테스트 종료 ---")
+
+    logger.info("--- Backtester 통합 테스트 시작 ---")
+
+    # 1. DBManager를 사용하여 DB 초기화 (선택 사항: 이전 테스트에서 데이터가 쌓여있다면 스킵 가능)
+    # 깨끗한 상태에서 시작하고 싶다면 주석 해제하여 실행
+    db_manager = DBManager()
+    db_manager.drop_all_tables()
+    db_manager.create_all_tables()
+    logger.info("DB tables dropped and recreated for clean test.")
+
+    # 2. 백테스팅 전략 인스턴스 생성
+    # 단기 5일, 장기 20일 이동평균선 전략
+    strategy = MovingAverageCrossoverStrategy(short_window=5, long_window=20)
+
+    # 3. 백테스터 인스턴스 생성
+    backtester = Backtester(
+        strategy=strategy,
+        initial_capital=100_000_000, # 1억 원
+        commission_rate=0.00015,
+        slippage_rate=0.0001
+    )
+
+    # 4. 백테스팅 대상 종목 및 기간 설정
+    # 테스트를 위해 실제 데이터가 있는 종목 (삼성전자, SK하이닉스 등)을 선택하는 것이 좋습니다.
+    # Creon API는 보통 당일 포함 최근 600일 정도의 일봉 데이터를 제공합니다.
+    # 테스트 기간은 너무 길지 않게 설정하여 데이터 로딩 시간을 줄입니다.
+    test_stocks = ['A005930', 'A000660', 'A035720'] # 삼성전자, SK하이닉스, 카카오
+    test_start_date = date(2024, 1, 2) # 데이터가 존재하는 적절한 시작 날짜
+    test_end_date = date(2024, 5, 28) # 오늘 날짜에 너무 가까우면 당일 데이터가 없을 수 있으므로, 며칠 전으로 설정
+
+    # 5. 백테스팅 데이터 로드 (DB에 데이터가 없으면 Creon API에서 가져와 DB에 저장)
+    logger.info("Step 5: Loading data for backtest...")
+    # 분봉 테스트 시 True로 변경
+    backtester.load_data_for_backtest(test_stocks, test_start_date, test_end_date, is_minute_data=False)
+    logger.info("Step 5: Data loading complete.")
+
+    # 6. 백테스팅 실행
+    logger.info("Step 6: Running backtest...")
+    final_results, trade_logs, portfolio_history_df = backtester.run_backtest()
+    logger.info("Step 6: Backtest execution complete.")
+
+    # 7. 백테스팅 결과 출력 (DB에 저장된 내용 확인)
+    logger.info("\n--- Backtest Final Results ---")
+    for key, value in final_results.items():
+        if isinstance(value, float):
+            logger.info(f"{key}: {value:.2f}")
+        else:
+            logger.info(f"{key}: {value}")
+
+    logger.info("\n--- Last 5 Trade Logs (from PortfolioManager) ---")
+    if trade_logs:
+        for log in trade_logs[-5:]: # 마지막 5개 로그 출력
+            logger.info(log)
+    else:
+        logger.info("No trade logs generated.")
+
+    logger.info("\n--- Last 5 Portfolio Value History (from PortfolioManager) ---")
+    if not portfolio_history_df.empty:
+        logger.info(portfolio_history_df.tail())
+    else:
+        logger.info("No portfolio value history generated.")
+        
+    logger.info("\n--- Verify Data in DB (Manual Check Required) ---")
+    logger.info("Please check 'backtest_results' and 'trade_log' tables in your MariaDB to confirm data storage.")
+
+    logger.info("--- Backtester 통합 테스트 종료 ---")
 
 if __name__ == "__main__":
     #run_db_tests()
     
     #run_creon_api_tests()
-    run_stock_data_manager_tests()
+    #run_stock_data_manager_tests()
+    run_full_backtest_test()

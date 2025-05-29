@@ -6,7 +6,8 @@ import os
 from config.settings import DB_HOST, DB_PORT, DB_NAME
 import logging
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+from typing import Dict, List, Any
 
 # .env 파일에서 환경 변수 로드
 load_dotenv()
@@ -149,14 +150,47 @@ class DBManager:
                 conn.close()
 
     # 각 테이블에 특화된 조회 및 저장 함수 (예시)
-    def save_stock_info(self, stock_info_list):
-        """
-        종목 정보를 stock_info 테이블에 저장 (UPSERT 기능 추가 예정)
-        :param stock_info_list: 종목 정보 딕셔너리 리스트
-        """
-        # 일단 단순 INSERT로 구현, 추후 UPSERT 또는 INSERT IGNORE 로직 추가
-        logger.info(f"Attempting to save {len(stock_info_list)} stock info records.")
-        return self.insert_data('stock_info', stock_info_list)
+    def save_stock_info(self, stock_info_list: List[Dict[str, Any]]): # 'Any'를 위해 from typing import Any 추가 필요
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                logger.error("Failed to connect to DB for saving stock info.")
+                return False
+            cursor = conn.cursor()
+
+            # ON DUPLICATE KEY UPDATE 절을 사용하여 중복 시 업데이트하도록 변경
+            query = """
+            INSERT INTO stock_info (stock_code, stock_name, market_type, sector, per, pbr, eps)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                stock_name = VALUES(stock_name),
+                market_type = VALUES(market_type),
+                sector = VALUES(sector),
+                per = VALUES(per),
+                pbr = VALUES(pbr),
+                eps = VALUES(eps);
+            """
+            
+            records = []
+            for item in stock_info_list:
+                records.append((
+                    item.get('stock_code'), item.get('stock_name'), item.get('market_type'),
+                    item.get('sector'), item.get('per'), item.get('pbr'), item.get('eps')
+                ))
+            
+            cursor.executemany(query, records)
+            conn.commit()
+            logger.info(f"Saved {len(stock_info_list)} stock info records to DB.")
+            return True
+        except Exception as e:
+            logger.error(f"Error inserting data into stock_info. Error: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if conn:
+                conn.close()
 
     def fetch_stock_info(self, stock_codes=None):
         """
@@ -221,23 +255,21 @@ class DBManager:
         return self.insert_data('trade_log', trade_logs)
 
 
-    def get_stock_info_count(self):
-        """stock_info 테이블의 총 레코드 개수를 반환합니다."""
+    def get_stock_info_count(self) -> int:
         conn = None
         try:
             conn = self.get_db_connection()
             if not conn:
+                logger.error("Failed to connect to DB for get_stock_info_count.")
                 return 0
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM stock_info")
-            result = cursor.fetchone() # 결과를 먼저 변수에 할당
-            if result is not None: # 결과가 None이 아닌지 확인
-                count = result[0]
-                logger.info(f"Current stock_info table has {count} records.")
+            query = "SELECT COUNT(*) AS count FROM stock_info;" # AS count 추가
+            cursor.execute(query)
+            result = cursor.fetchone()
+            if result:
+                count = result['count'] # result[0] 대신 result['count'] 사용
                 return count
-            else: # 결과가 None인 경우 (예외적인 상황이지만 대비)
-                logger.warning("No result from COUNT(*) query for stock_info table. Assuming 0 records.")
-                return 0
+            return 0
         except Exception as e:
             logger.error(f"Failed to get stock info count: {e}", exc_info=True)
             return 0
@@ -245,31 +277,32 @@ class DBManager:
             if conn:
                 conn.close()
 
-    def get_latest_daily_data_date(self, stock_code):
-        """
-        특정 종목의 daily_stock_data 테이블에서 가장 최근 날짜를 조회합니다.
-        :param stock_code: 조회할 종목 코드
-        :return: datetime.date 객체 또는 None
-        """
+
+    def get_latest_daily_data_date(self, stock_code: str) -> date:
         conn = None
         try:
             conn = self.get_db_connection()
             if not conn:
-                return None
+                return date(1900, 1, 1) # 연결 실패 시 기본값 반환
+
             cursor = conn.cursor()
-            query = "SELECT MAX(date) FROM daily_stock_data WHERE stock_code = %s"
+            # `datetime` 컬럼이 아니므로 `DATE_FORMAT` 필요 없음, `MAX(date)` 사용
+            query = """
+            SELECT MAX(date) AS latest_date
+            FROM daily_stock_data
+            WHERE stock_code = %s;
+            """
             cursor.execute(query, (stock_code,))
-            result = cursor.fetchone() # 결과를 먼저 변수에 할당
-            if result is not None and result[0] is not None: # 결과가 None이 아니고, 첫 번째 컬럼도 None이 아닌지 확인
-                latest_date = result[0]
-                logger.info(f"Latest daily data date for {stock_code}: {latest_date}")
-                return latest_date
+            result = cursor.fetchone()
+
+            # result['latest_date']로 접근
+            if result and result['latest_date'] is not None:
+                return result['latest_date']
             else:
-                logger.info(f"No daily data found for {stock_code}.")
-                return None
+                return date(1900, 1, 1) # 데이터가 없는 경우 (가장 오래된 날짜)
         except Exception as e:
             logger.error(f"Failed to get latest daily data date for {stock_code}: {e}", exc_info=True)
-            return None
+            return date(1900, 1, 1)
         finally:
             if conn:
                 conn.close()
@@ -328,32 +361,235 @@ class DBManager:
             if conn:
                 conn.close()
 
-    def get_latest_minute_data_datetime(self, stock_code): # interval 인자 제거 (확인)
+    def get_latest_minute_data_datetime(self, stock_code: str) -> datetime:
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return datetime(1900, 1, 1, 0, 0, 0)
+
+            cursor = conn.cursor()
+            query = """
+            SELECT MAX(datetime) AS latest_datetime
+            FROM minute_stock_data
+            WHERE stock_code = %s;
+            """
+            cursor.execute(query, (stock_code,))
+            result = cursor.fetchone()
+
+            if result and result['latest_datetime'] is not None:
+                return result['latest_datetime']
+            else:
+                return datetime(1900, 1, 1, 0, 0, 0)
+        except Exception as e:
+            logger.error(f"Failed to get latest minute data datetime for {stock_code}: {e}", exc_info=True)
+            return datetime(1900, 1, 1, 0, 0, 0)
+        finally:
+            if conn:
+                conn.close()
+
+    def get_daily_data(self, stock_code: str, start_date: date, end_date: date) -> pd.DataFrame:
         """
-        특정 종목의 minute_stock_data 테이블에서 가장 최근 날짜/시간을 조회합니다.
-        :param stock_code: 조회할 종목 코드
-        :return: datetime.datetime 객체 또는 None
+        특정 종목의 일봉 데이터를 지정된 기간 동안 조회합니다.
+        :param stock_code: 종목 코드
+        :param start_date: 시작 날짜 (inclusive)
+        :param end_date: 종료 날짜 (inclusive)
+        :return: Pandas DataFrame
         """
         conn = None
         try:
             conn = self.get_db_connection()
             if not conn:
-                return None
-            cursor = conn.cursor()
-            # 쿼리에서 `interval` 조건 제거 (확인)
-            query = "SELECT MAX(datetime) FROM minute_stock_data WHERE stock_code = %s"
-            cursor.execute(query, (stock_code,))
-            result = cursor.fetchone() # 결과를 먼저 변수에 할당
-            if result is not None and result[0] is not None: # 결과가 None이 아니고, 첫 번째 컬럼도 None이 아닌지 확인
-                latest_datetime = result[0]
-                logger.info(f"Latest minute data datetime for {stock_code}: {latest_datetime}")
-                return latest_datetime
-            else:
-                logger.info(f"No minute data found for {stock_code}.")
-                return None
+                return pd.DataFrame()
+            query = """
+            SELECT stock_code, date, open_price, high_price, low_price, close_price, volume, change_rate, trading_value
+            FROM daily_stock_data
+            WHERE stock_code = %s AND date BETWEEN %s AND %s
+            ORDER BY date ASC;
+            """
+            df = pd.read_sql(query, conn, params=(stock_code, start_date, end_date), index_col='date')
+            return df
         except Exception as e:
-            logger.error(f"Failed to get latest minute data datetime for {stock_code}: {e}", exc_info=True)
-            return None
+            logger.error(f"Failed to get daily data for {stock_code}: {e}", exc_info=True)
+            return pd.DataFrame()
         finally:
             if conn:
                 conn.close()
+
+    def get_minute_data_for_date(self, stock_code: str, target_date: date) -> pd.DataFrame:
+        """
+        특정 종목의 특정 날짜에 해당하는 모든 분봉 데이터를 조회합니다.
+        :param stock_code: 종목 코드
+        :param target_date: 조회할 날짜
+        :return: Pandas DataFrame
+        """
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                return pd.DataFrame()
+            query = """
+            SELECT stock_code, datetime, open_price, high_price, low_price, close_price, volume
+            FROM minute_stock_data
+            WHERE stock_code = %s AND DATE(datetime) = %s
+            ORDER BY datetime ASC;
+            """
+            # datetime 컬럼이 인덱스가 되어야 하므로, parse_dates와 index_col을 사용
+            df = pd.read_sql(query, conn, params=(stock_code, target_date), parse_dates=['datetime'], index_col='datetime')
+            return df
+        except Exception as e:
+            logger.error(f"Failed to get minute data for {stock_code} on {target_date}: {e}", exc_info=True)
+            return pd.DataFrame()
+        finally:
+            if conn:
+                conn.close()
+
+
+    def create_all_tables(self):
+        """필요한 모든 테이블을 생성합니다."""
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                logger.error("Failed to connect to DB for table creation.")
+                return False
+            
+            cursor = conn.cursor()
+
+            # stock_info 테이블 (종목 기본 정보)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stock_info (
+                stock_code VARCHAR(10) PRIMARY KEY,
+                stock_name VARCHAR(100) NOT NULL,
+                market_type VARCHAR(20),
+                sector VARCHAR(100),
+                per DECIMAL(10, 2),
+                pbr DECIMAL(10, 2),
+                eps DECIMAL(15, 2),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            logger.info("Table 'stock_info' ensured.")
+
+            # daily_stock_data 테이블 (일별 주가 데이터)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_stock_data (
+                stock_code VARCHAR(10) NOT NULL,
+                date DATE NOT NULL,
+                open_price DECIMAL(15, 2) NOT NULL,
+                high_price DECIMAL(15, 2) NOT NULL,
+                low_price DECIMAL(15, 2) NOT NULL,
+                close_price DECIMAL(15, 2) NOT NULL,
+                volume BIGINT NOT NULL,
+                change_rate DECIMAL(10, 4),
+                trading_value BIGINT,
+                PRIMARY KEY (stock_code, date)
+            ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            logger.info("Table 'daily_stock_data' ensured.")
+
+            # minute_stock_data 테이블 (분별 주가 데이터)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS minute_stock_data (
+                stock_code VARCHAR(10) NOT NULL,
+                datetime DATETIME NOT NULL,
+                open_price DECIMAL(15, 2) NOT NULL,
+                high_price DECIMAL(15, 2) NOT NULL,
+                low_price DECIMAL(15, 2) NOT NULL,
+                close_price DECIMAL(15, 2) NOT NULL,
+                volume BIGINT NOT NULL,
+                PRIMARY KEY (stock_code, datetime)
+            ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            logger.info("Table 'minute_stock_data' ensured.")
+            
+            # backtest_results 테이블 (백테스팅 결과 요약)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_results (
+                result_id INT AUTO_INCREMENT PRIMARY KEY,
+                strategy_name VARCHAR(100) NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                initial_capital DECIMAL(20, 2) NOT NULL,
+                final_capital DECIMAL(20, 2) NOT NULL,
+                total_return DECIMAL(10, 2),
+                annualized_return DECIMAL(10, 2),
+                max_drawdown DECIMAL(10, 2),
+                sharpe_ratio DECIMAL(10, 4),
+                total_trades INT,
+                win_rate DECIMAL(10, 2),
+                profit_factor DECIMAL(10, 2),
+                commission_rate DECIMAL(10, 5),
+                slippage_rate DECIMAL(10, 5),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            logger.info("Table 'backtest_results' ensured.")
+
+            # trade_log 테이블 (개별 거래 내역)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trade_log (
+                trade_id INT AUTO_INCREMENT PRIMARY KEY,
+                result_id INT NOT NULL,
+                stock_code VARCHAR(10) NOT NULL,
+                trade_date DATETIME NOT NULL,
+                trade_type VARCHAR(10) NOT NULL, -- 'BUY' or 'SELL'
+                price DECIMAL(15, 2) NOT NULL,
+                quantity INT NOT NULL,
+                commission DECIMAL(15, 2) NOT NULL,
+                slippage DECIMAL(15, 2) NOT NULL,
+                pnl DECIMAL(15, 2), -- Profit and Loss for this trade (realized)
+                position_size INT, -- position after this trade
+                portfolio_value DECIMAL(20, 2), -- portfolio value after this trade
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (result_id) REFERENCES backtest_results(result_id) ON DELETE CASCADE
+            ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            logger.info("Table 'trade_log' ensured.")
+
+            conn.commit()
+            logger.info("All tables created successfully (if not already existing).")
+            return True
+        except pymysql.Error as e:
+            logger.error(f"Error creating tables: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def drop_all_tables(self):
+        """모든 테이블을 삭제합니다."""
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            if not conn:
+                logger.error("Failed to connect to DB for table dropping.")
+                return False
+            
+            cursor = conn.cursor()
+            
+            # 외래 키 제약 조건 비활성화 (테이블 삭제 순서 때문에)
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+
+            tables = ["trade_log", "backtest_results", "minute_stock_data", "daily_stock_data", "stock_info"]
+            for table in tables:
+                cursor.execute(f"DROP TABLE IF EXISTS {table};")
+                logger.info(f"Table '{table}' dropped.")
+            
+            # 외래 키 제약 조건 다시 활성화
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+            
+            conn.commit()
+            logger.info("All tables dropped successfully.")
+            return True
+        except pymysql.Error as e:
+            logger.error(f"Error dropping tables: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if conn:
+                conn.close()                
