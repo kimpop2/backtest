@@ -2,14 +2,14 @@
 
 -- 데이터베이스 생성 (필요시 주석 해제 후 사용)
 CREATE DATABASE IF NOT EXISTS backtest_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE stock_backtest_db;
+USE backtest_db;
 
 -- 1. 종목 정보 테이블
 -- Creon API를 통해 얻는 종목 코드, 종목명, 시장 구분 등을 저장
 CREATE TABLE IF NOT EXISTS stock_info (
     stock_code VARCHAR(10) PRIMARY KEY NOT NULL, -- 종목 코드 (예: A005930)
     stock_name VARCHAR(100) NOT NULL,            -- 종목명 (예: 삼성전자)
-    market_type VARCHAR(1) NOT NULL,             -- 시장 구분 (예: 1:KOSPI, 2:KOSDAQ)
+    market_type VARCHAR(10) NOT NULL,             -- 시장 구분 (예: 1:KOSPI, 2:KOSDAQ)
     sector VARCHAR(100),                         -- 섹터 (선택적)
     per DECIMAL(10, 2),                          -- PER (선택적, 기본적 분석용)
     pbr DECIMAL(10, 2),                          -- PBR (선택적, 기본적 분석용)
