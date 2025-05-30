@@ -65,11 +65,10 @@ class Backtester:
         # 백테스트 대상 종목들의 데이터만 가져옵니다.
         for stock_code in stock_list:
             if self.is_minute_data_test:
-                self.stock_data_manager.update_minute_ohlcv_data(
-                    stock_code=stock_code,
-                    start_date=start_date,
-                    end_date=end_date
-                )
+                # 분봉 데이터는 일별로 조회하는 대신, 해당 날짜의 모든 분봉 데이터를 가져와서 내부적으로 분 단위로 순회해야 함.
+                # 여기서는 일단 일봉처럼 '해당 날짜의 데이터'만 가져오도록 추상화. 실제 분봉은 아래 별도 로직.
+                # 분봉 백테스트 로직은 일봉 백테스트와 분리해서 구현하는 것이 합리적임.
+                pass # 아래 else if 분봉 처리 로직으로 대체될 것임
             else:
                 self.stock_data_manager.update_daily_ohlcv_data(
                     stock_code=stock_code,
@@ -87,7 +86,10 @@ class Backtester:
             return
 
         logger.info(f"Starting backtest from {self.start_date} to {self.end_date} for {len(self.stock_list)} stocks.")
-        self.strategy.on_init(self.initial_capital, self.stock_list)
+        
+        # --- 핵심 변경 사항: strategy.on_init 호출 시 portfolio_manager 전달 ---
+        self.strategy.on_init(self.initial_capital, self.stock_list, self.portfolio_manager)
+        # ----------------------------------------------------------------------
 
         current_date_iter = self.start_date
         while current_date_iter <= self.end_date:
@@ -101,7 +103,6 @@ class Backtester:
                 if self.is_minute_data_test:
                     # 분봉 데이터는 일별로 조회하는 대신, 해당 날짜의 모든 분봉 데이터를 가져와서 내부적으로 분 단위로 순회해야 함.
                     # 여기서는 일단 일봉처럼 '해당 날짜의 데이터'만 가져오도록 추상화. 실제 분봉은 아래 별도 로직.
-                    # 백테스터가 시간 단위로 데이터를 공급해야 하므로, 분봉 데이터 로딩 방식이 일봉과 다름.
                     # 분봉 백테스트 로직은 일봉 백테스트와 분리해서 구현하는 것이 합리적임.
                     pass # 아래 else if 분봉 처리 로직으로 대체될 것임
                 else:
@@ -263,4 +264,3 @@ class Backtester:
         finally:
             if conn:
                 conn.close()
-

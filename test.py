@@ -206,12 +206,12 @@ def run_full_backtest_test():
 
     # 2. 백테스팅 전략 인스턴스 생성
     # 단기 5일, 장기 20일 이동평균선 전략
-    strategy = MovingAverageCrossoverStrategy(short_window=5, long_window=20)
+    strategy = MovingAverageCrossoverStrategy(short_window=2, long_window=7)
 
     # 3. 백테스터 인스턴스 생성
     backtester = Backtester(
         strategy=strategy,
-        initial_capital=100_000_000, # 1억 원
+        initial_capital=1_000_000, # 1억 원
         commission_rate=0.00015,
         slippage_rate=0.0001
     )
@@ -220,9 +220,10 @@ def run_full_backtest_test():
     # 테스트를 위해 실제 데이터가 있는 종목 (삼성전자, SK하이닉스 등)을 선택하는 것이 좋습니다.
     # Creon API는 보통 당일 포함 최근 600일 정도의 일봉 데이터를 제공합니다.
     # 테스트 기간은 너무 길지 않게 설정하여 데이터 로딩 시간을 줄입니다.
-    test_stocks = ['A005930', 'A000660', 'A035720'] # 삼성전자, SK하이닉스, 카카오
+    #test_stocks = ['A005930', 'A000660', 'A035720'] # 삼성전자, SK하이닉스, 카카오
+    test_stocks = ['A012450', 'A042660', 'A103140'] # 한화에어로스페이스, 한화오션, 풍산
     test_start_date = date(2024, 1, 2) # 데이터가 존재하는 적절한 시작 날짜
-    test_end_date = date(2024, 5, 28) # 오늘 날짜에 너무 가까우면 당일 데이터가 없을 수 있으므로, 며칠 전으로 설정
+    test_end_date = date(2025, 5, 28) # 오늘 날짜에 너무 가까우면 당일 데이터가 없을 수 있으므로, 며칠 전으로 설정
 
     # 5. 백테스팅 데이터 로드 (DB에 데이터가 없으면 Creon API에서 가져와 DB에 저장)
     logger.info("Step 5: Loading data for backtest...")
@@ -264,6 +265,6 @@ def run_full_backtest_test():
 if __name__ == "__main__":
     #run_db_tests()
     
-    run_creon_api_tests()
+    #run_creon_api_tests()
     #run_stock_data_manager_tests()
-    #run_full_backtest_test()
+    run_full_backtest_test()
