@@ -160,8 +160,8 @@ class CreonAPIClient:
             # 요청 항목: 날짜(0), 시간(1), 시가(2), 고가(3), 저가(4), 종가(5), 거래량(8)
             requested_fields = [0, 1, 2, 3, 4, 5, 8] # Creon API의 필드 인덱스
         else: # 일봉, 주봉, 월봉
-            # 요청 항목: 날짜(0), 시가(1), 고가(2), 저가(3), 종가(4), 거래량(5), 거래대금(8)
-            requested_fields = [0, 1, 2, 3, 4, 5, 8]
+            # 요청 항목: 날짜(0), 시가(2), 고가(3), 저가(4), 종가(5), 거래량(8)
+            requested_fields = [0, 2, 3, 4, 5, 8]
             
         objChart.SetInputValue(5, requested_fields) # 요청할 데이터
 
@@ -213,7 +213,7 @@ class CreonAPIClient:
                         'close_price': objChart.GetDataValue(4, i), # 필드 4의 실제 인덱스는 4
                         'volume': objChart.GetDataValue(5, i), # 필드 5의 실제 인덱스는 5
                         'change_rate': None, # 추후 계산
-                        'trading_value': objChart.GetDataValue(6, i) # 필드 8(거래대금)의 실제 인덱스는 6
+                        'trading_value': None # 필드 8(거래대금)의 실제 인덱스는 6
                     })
             
             if not objChart.Continue:

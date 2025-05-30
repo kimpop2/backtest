@@ -264,6 +264,6 @@ def run_full_backtest_test():
 if __name__ == "__main__":
     #run_db_tests()
     
-    #run_creon_api_tests()
+    run_creon_api_tests()
     #run_stock_data_manager_tests()
-    run_full_backtest_test()
+    #run_full_backtest_test()

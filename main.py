@@ -1,4 +1,4 @@
-# stock_backtester/main.py
+# backtest/main.py
 
 def main():
     print("주식 백테스팅 시뮬레이터 시작...")

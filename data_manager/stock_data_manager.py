@@ -1,4 +1,4 @@
-# backtest/data_manager/stock_data_manager.py (수정된 내용)
+# backtest/data_manager/stock_data_manager.py
 
 import logging
 from datetime import datetime, timedelta
